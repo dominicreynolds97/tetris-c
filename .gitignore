@@ -1,0 +1,9 @@
+tetris
+tetris.asm
+*.o
+
+*.dSYM/
+
+compile_commands.json
+
+.DS_Store
