@@ -134,33 +134,6 @@ TetrominoState make_state(Tetromino *piece) {
   return state;
 }
 
-void rotate(GameState *game, int dir) {
-  TetrominoState rotated = {0};
-  int can_rotate = 1;
-  for (int r = 0; r < 4; r++) {
-    for (int c = 0; c < 4; c++) {
-      if (game->active_piece.cells[r][c]) {
-        int new_r = (dir == 1) ? c : (3 - c);
-        int new_c = (dir == 1) ? (3 - r) : r;
-        if (
-            game->piece_col + new_c < 0 ||
-            game->piece_col + new_c >= BOARD_COLS || (
-             game->piece_row + new_r >= 0 &&
-             game->board[game->piece_row + new_r][game->piece_col + new_c] != 0
-        )) {
-          can_rotate = 0;
-          break;
-        }
-        rotated.cells[new_r][new_c] = game->active_piece.cells[r][c];
-      }
-    }
-    if (can_rotate == 0) break;
-  }
-  if (can_rotate == 1) {
-    game->active_piece = rotated;
-  }
-}
-
 void spawn_piece(GameState *game) {
   int idx = rand() % NUM_PIECES;
   game->active_piece = make_state(&pieces[idx]);
@@ -324,6 +297,52 @@ int can_move(GameState *game, int dir) {
 void move(GameState *game, int dir) {
   if (can_move(game, dir) != 0) {
     game->piece_col = game->piece_col + dir;
+  }
+}
+
+
+
+void rotate(GameState *game, int dir) {
+  TetrominoState rotated = {0};
+  int nudge = 0;
+  int can_rotate = 1;
+
+  for (int r = 0; r < 4; r++) {
+    for (int c = 0; c < 4; c++) {
+      if (game->active_piece.cells[r][c]) {
+        int new_c = (dir == 1) ? (3 - r) : r;
+        if (game->piece_col + new_c < 0 &&
+            nudge < -(game->piece_col + new_c)) {
+          nudge = -(game->piece_col + new_c);
+        }
+        if (game->piece_col + new_c >= BOARD_COLS &&
+            nudge > BOARD_COLS - 1 - (game->piece_col + new_c)) {
+          nudge = BOARD_COLS - 1 - (game->piece_col + new_c);
+        }
+      }
+    }
+  }
+
+  for (int r = 0; r < 4; r++) {
+    for (int c = 0; c < 4; c++) {
+      if (game->active_piece.cells[r][c]) {
+        int new_r = (dir == 1) ? c : (3 - c);
+        int new_c = (dir == 1) ? (3 - r) : r;
+
+        if (game->piece_row + new_r >= 0 &&
+             game->board[game->piece_row + new_r][game->piece_col + new_c + nudge] != 0
+        ) {
+          can_rotate = 0;
+          break;
+        }
+        rotated.cells[new_r][new_c] = game->active_piece.cells[r][c];
+      }
+    }
+    if (can_rotate == 0) break;
+  }
+  if (can_rotate == 1) {
+    game->piece_col = nudge;
+    game->active_piece = rotated;
   }
 }
 
