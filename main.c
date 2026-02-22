@@ -1,48 +1,89 @@
+#include "SDL_events.h"
+#include "SDL_render.h"
+#include "SDL_surface.h"
 #include <_stdio.h>
 #include <stdio.h>
 #include <time.h>
 #include <signal.h>
 #include <stdlib.h>
-#include <termios.h>
-#include <unistd.h>
+#include <SDL.h>
+#include <SDL_ttf.h>
 
-// CONSTANTS
 #define BOARD_ROWS 20
 #define BOARD_COLS 10
-#define HIDE_CURSOR "\e[?25l"
-#define SHOW_CURSOR "\e[?25h"
-#define CLEAR_CONSOLE "\033[2J"
-#define RESET_CURSOR_POS "\033[H"
-#define COLOR_RESET "\33[0m"
-#define WHITE "\033[37m"
 
-struct termios original_termios;
+#define SCREEN_WIDTH 600
+#define SCREEN_HEIGHT 700
+#define MARGIN 20
+#define PANEL_X (MARGIN + BOARD_COLS * CELL_SIZE + MARGIN)
+#define PANEL_CELL_SIZE 25
+#define CELL_SIZE 30
 
-void enable_raw_mode(void) {
-  tcgetattr(STDIN_FILENO, &original_termios);
-  struct termios raw = original_termios;
-  raw.c_lflag &= ~(ICANON | ECHO);
-  raw.c_cc[VMIN] = 0;
-  raw.c_cc[VTIME] = 0;
-  tcsetattr(STDIN_FILENO, TCIFLUSH, &raw);
-}
+#define FONT_LOCATION "/System/Library/Fonts/Helvetica.ttc"
+#define FONT_SIZE 20
 
-void disable_raw_mode(void) {
-  tcsetattr(STDIN_FILENO, TCIFLUSH, &original_termios);
-}
 
-const char *COLORS[] = {
-  COLOR_RESET, // 0 - empty, reset
-  "\033[31m", // 1 - S, red
-  "\033[32m", // 2 - Z, green
-  "\033[33m", // 3 - L, yellow
-  "\033[34m", // 4 - J, blue
-  "\033[35m", // 5 - T, magenta
-  "\033[36m", // 6 - I, cyan
-  WHITE, // 7 - O, white
+typedef struct { int r, g, b; } Color;
+
+Color COLORS[] = {
+  {0,   0,   0  }, // 0 - empty
+  {255, 0,   0  }, // 1 - S
+  {0,   255, 0  }, // 2 - Z
+  {255, 255, 0  }, // 3 - L
+  {0,   0,   255}, // 4 - J
+  {128, 0,   255}, // 5 - T
+  {0,   255, 255}, // 6 - I
+  {255, 255, 255}, // 7 - O
 };
 
 static volatile int running = 1;
+
+SDL_Window *window;
+SDL_Renderer *renderer;
+TTF_Font *font;
+
+void setup_renderer(void) {
+  SDL_Init(SDL_INIT_VIDEO);
+  TTF_Init();
+  SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT, 0, &window, &renderer);
+  font = TTF_OpenFont(FONT_LOCATION, FONT_SIZE);
+}
+
+void cleanup_renderer(void) {
+  TTF_CloseFont(font);
+  TTF_Quit();
+  SDL_DestroyRenderer(renderer);
+  SDL_DestroyWindow(window);
+  SDL_Quit();
+}
+
+void draw_border(int x, int y, int w, int h) {
+  SDL_Rect rect = { x, y, w, h };
+  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+  SDL_RenderDrawRect(renderer, &rect);
+}
+
+void render_cell_at(int x, int y, int size, int color_id) {
+  SDL_Rect rect = { x, y, size, size };
+  Color color = COLORS[color_id];
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+  SDL_RenderFillRect(renderer, &rect);
+
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 50);
+  SDL_RenderDrawRect(renderer, &rect);
+}
+
+void render_text(const char *text, int x, int y) {
+  SDL_Color white = {255, 255, 255, 255};
+  SDL_Surface *surface = TTF_RenderText_Solid(font, text, white);
+  SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+
+  SDL_Rect dst = { x, y, surface->w, surface->h };
+  SDL_RenderCopy(renderer, texture, NULL, &dst);
+
+  SDL_FreeSurface(surface);
+  SDL_DestroyTexture(texture);
+}
 
 typedef struct {
   unsigned char rows[4];
@@ -76,6 +117,7 @@ typedef struct {
   char piece_row;
   char piece_col;
   float speed;
+  int game_over;
 } GameState;
 
 TetrominoState make_state(Tetromino *piece) {
@@ -98,7 +140,12 @@ void rotate(GameState *game, int dir) {
       if (game->active_piece.cells[r][c]) {
         int new_r = (dir == 1) ? c : (3 - c);
         int new_c = (dir == 1) ? (3 - r) : r;
-        if (game->piece_row + new_r >= 0 && game->board[game->piece_row + new_r][game->piece_col + new_c] != 0) {
+        if (
+            game->piece_col + new_c < 0 ||
+            game->piece_col + new_c >= BOARD_COLS || (
+             game->piece_row + new_r >= 0 &&
+             game->board[game->piece_row + new_r][game->piece_col + new_c] != 0
+        )) {
           can_rotate = 0;
           break;
         }
@@ -129,6 +176,7 @@ void init_game(GameState *game) {
   game->level = 1;
   game->total_clears = 0;
   game->has_stored_piece = 0;
+  game->game_over = 0;
   game->speed = 1.0;
 }
 
@@ -136,41 +184,59 @@ int is_cell_filled(GameState *game, int row, int col) {
   return game->board[row][col] != 0;
 }
 
-void render_cell(int cell_value) {
-  if (cell_value == 0) {
-    printf("  ");
-  } else {
-    printf("%s██", COLORS[cell_value]);
-  }
+void render_cell(int row, int col, int cell_value) {
+  render_cell_at(
+      MARGIN + col * CELL_SIZE,
+      MARGIN + row * CELL_SIZE,
+      CELL_SIZE,
+      cell_value
+  );
 }
 
-void print_h_border() {
-  for (int i = 0; i <= BOARD_COLS; i++) {
-    printf("%s--", WHITE);
-  }
-  printf("\n");
-}
+void render_stored(GameState *game) {
+  draw_border(PANEL_X, MARGIN, 4 * PANEL_CELL_SIZE + 2, 4 * PANEL_CELL_SIZE + 2);
 
-void print_stored(GameState *game) {
-  printf("%s\n----------\n", WHITE);
   for (int r = 0; r < 4; r++) {
-    printf("%s|", WHITE);
     for (int c = 0; c < 4; c++) {
-      int cell_value = game->has_stored_piece ? game->stored_peice.cells[r][c] : 0;
-      render_cell(cell_value);
+
+      int color_id = game->has_stored_piece
+        ? game->stored_peice.cells[r][c]
+        : 0;
+
+      render_cell_at(
+          PANEL_X + 1 + c * PANEL_CELL_SIZE,
+          MARGIN + 1 + r * PANEL_CELL_SIZE,
+          PANEL_CELL_SIZE,
+          color_id
+      );
     }
-    printf("%s|\n", WHITE);
   }
-  printf("%s----------\n", WHITE);
+}
+
+void clear_frame(void) {
+  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+  SDL_RenderClear(renderer);
+}
+
+void render_ui(GameState *game) {
+  char buf[64];
+
+  snprintf(buf, sizeof(buf), "Score: %d", game->score);
+  render_text(buf, PANEL_X, MARGIN + 4 * PANEL_CELL_SIZE + 30);
+
+  snprintf(buf, sizeof(buf), "Level: %d", game->level);
+  render_text(buf, PANEL_X, MARGIN + 4 * PANEL_CELL_SIZE + 50);
+
+  snprintf(buf, sizeof(buf), "Lines: %d", game->total_clears);
+  render_text(buf, PANEL_X, MARGIN + 4 * PANEL_CELL_SIZE + 70);
 }
 
 void render(GameState *game) {
-  printf(RESET_CURSOR_POS);
+  clear_frame();
 
-  print_h_border();
+  draw_border(MARGIN - 1, MARGIN - 1, BOARD_COLS * CELL_SIZE + 2, BOARD_ROWS * CELL_SIZE + 2);
 
   for (int r = 0; r < BOARD_ROWS; r++) {
-    printf("%s|", WHITE);
     for (int c = 0; c < BOARD_COLS; c++) {
       int pr = r - game->piece_row;
       int pc = c - game->piece_col;
@@ -179,20 +245,21 @@ void render(GameState *game) {
                           pc >= 0 && pc < 4 &&
                           game->active_piece.cells[pr][pc] != 0;
 
+      int color_id;
       if (is_piece_cell) {
-        int id = game->active_piece.cells[pr][pc];
-        render_cell(id);
+        color_id = game->active_piece.cells[pr][pc];
       } else {
-        int id = game->board[r][c];
-        render_cell(id);
+        color_id = game->board[r][c];
       }
+      render_cell(r, c, color_id);
     }
-    printf("%s|\n", WHITE);
   }
-  print_h_border();
-  printf("%sScore: %d Level: %d\n", WHITE, game->score, game->level);
 
-  print_stored(game);
+  render_stored(game);
+
+  render_ui(game);
+
+  SDL_RenderPresent(renderer);
 }
 
 int detect_collision(GameState *game) {
@@ -209,16 +276,24 @@ int detect_collision(GameState *game) {
   return 0;
 }
 
-void handle_collision(GameState *game) {
+void trigger_game_over(GameState *game) {
+  game->game_over = 1;
+}
+
+int handle_collision(GameState *game) {
   for (int pr = 0; pr < 4; pr++) {
     for (int pc = 0; pc < 4; pc++) {
       if (game->active_piece.cells[pr][pc] != 0) {
+        if (game->piece_row + pr <= 0) {
+          trigger_game_over(game);
+          return 0;
+        }
         game->board[pr + game->piece_row][pc + game->piece_col] = game->active_piece.cells[pr][pc];
       }
     }
   }
+  return 1;
 }
-
 
 void handle_sigint(int sig) {
   (void)sig;
@@ -230,10 +305,10 @@ int can_move(GameState *game, int dir) {
     for (int pc = 0; pc < 4; pc++) {
       if (game->active_piece.cells[pr][pc] != 0) {
         int row = pr + game->piece_row;
-        if (row < 0) continue;
-
         // detect bounds
         if (game->piece_col + pc + dir < 0 || game->piece_col + pc + dir >= BOARD_COLS) return 0;
+
+        if (row < 0) continue;
 
         // detect collision
         if (game->board[pr + game->piece_row][pc + game->piece_col + dir] != 0) return 0;
@@ -253,8 +328,9 @@ void move(GameState *game, int dir) {
 int fall(GameState *game) {
   int has_collided = detect_collision(game);
   if (has_collided != 0) {
-    handle_collision(game);
-    spawn_piece(game);
+    if (handle_collision(game)) {
+      spawn_piece(game);
+    }
   } else {
     game->piece_row += 1;
   }
@@ -335,46 +411,66 @@ void update(GameState *game, double delta_time) {
 }
 
 void handle_input(GameState *game) {
-  char c;
-  if (read(STDIN_FILENO, &c, 1) != 1) return;
+  SDL_Event event;
 
-  switch (c) {
-    case 'a':
-      // move left
-      move(game, -1);
-      break;
-    case 'd':
-      // move right
-      move(game, 1);
-      break;
-    case 's':
-      fall(game);
-      break;
-    case 'e':
-      rotate(game, 1);
-      break;
-    case 'q':
-      rotate(game, -1);
-      break;
-    case 'w':
-      store(game);
-      break;
-    case ' ':
-      drop(game);
-      break;
+  while (SDL_PollEvent(&event)) {
+    if (event.type == SDL_QUIT) running = 0;
+    if (event.type == SDL_KEYDOWN) {
+      switch (event.key.keysym.sym) {
+        case SDLK_a: move(game, -1); break;
+        case SDLK_d: move(game, 1); break;
+        case SDLK_s: fall(game); break;
+        case SDLK_e: rotate(game, 1); break;
+        case SDLK_q: rotate(game, -1); break;
+        case SDLK_w: store(game); break;
+        case SDLK_SPACE: drop(game); break;
+      }
+    }
+  }
+}
+
+void render_game_over(GameState *game) {
+  clear_frame();
+
+  draw_border(MARGIN, MARGIN, SCREEN_WIDTH - MARGIN - MARGIN, SCREEN_HEIGHT - MARGIN - MARGIN);
+  render_text("GAME OVER", SCREEN_WIDTH / 2 - 60, SCREEN_HEIGHT / 2);
+
+  char buf[64];
+
+  snprintf(buf, sizeof(buf), "Score: %d", game->score);
+  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 30);
+
+  snprintf(buf, sizeof(buf), "Level: %d", game->level);
+  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 60);
+
+  snprintf(buf, sizeof(buf), "Lines: %d", game->total_clears);
+  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 90);
+
+  render_text("Press R to restart or Q to quit", SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 + 140);
+
+  SDL_RenderPresent(renderer);
+
+  SDL_Event event;
+
+  while (SDL_PollEvent(&event)) {
+    if (event.type == SDL_QUIT) running = 0;
+    if (event.type == SDL_KEYDOWN) {
+      switch (event.key.keysym.sym) {
+        case SDLK_r: init_game(game); break;
+        case SDLK_q: running = 0; break;
+
+      }
+    }
   }
 }
 
 int main(void) {
   GameState game;
 
-  enable_raw_mode();
+  setup_renderer();
   init_game(&game);
   srand(time(NULL));
   spawn_piece(&game);
-
-  printf(CLEAR_CONSOLE);
-  printf(HIDE_CURSOR);
 
   struct timespec previous, current;
   clock_gettime(CLOCK_MONOTONIC, &current);
@@ -391,19 +487,20 @@ int main(void) {
     previous = current;
     accumulator += delta_time;
 
-    handle_input(&game);
-    render(&game);
+    if (game.game_over == 0) {
+      handle_input(&game);
+      render(&game);
 
-    if (accumulator >= game.speed) {
-      update(&game, accumulator);
-      accumulator = 0.0;
+      if (accumulator >= game.speed) {
+        update(&game, accumulator);
+        accumulator = 0.0;
+      }
+    } else {
+      render_game_over(&game);
     }
   }
 
-  printf(CLEAR_CONSOLE);
-  printf(RESET_CURSOR_POS);
-  printf(SHOW_CURSOR);
-  disable_raw_mode();
+  cleanup_renderer();
 
   return 0;
 }
