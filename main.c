@@ -1,6 +1,7 @@
 #include "SDL_events.h"
 #include "SDL_render.h"
 #include "SDL_surface.h"
+#include "SDL_video.h"
 #include <_stdio.h>
 #include <stdio.h>
 #include <time.h>
@@ -45,7 +46,8 @@ TTF_Font *font;
 void setup_renderer(void) {
   SDL_Init(SDL_INIT_VIDEO);
   TTF_Init();
-  SDL_CreateWindowAndRenderer(SCREEN_WIDTH, SCREEN_HEIGHT, 0, &window, &renderer);
+  window = SDL_CreateWindow("Tetris", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, SCREEN_WIDTH, SCREEN_HEIGHT, 0);
+  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   font = TTF_OpenFont(FONT_LOCATION, FONT_SIZE);
 }
 
@@ -433,20 +435,20 @@ void render_game_over(GameState *game) {
   clear_frame();
 
   draw_border(MARGIN, MARGIN, SCREEN_WIDTH - MARGIN - MARGIN, SCREEN_HEIGHT - MARGIN - MARGIN);
-  render_text("GAME OVER", SCREEN_WIDTH / 2 - 60, SCREEN_HEIGHT / 2);
+  render_text("GAME OVER", SCREEN_WIDTH / 2 - 80, SCREEN_HEIGHT / 2 - 80);
 
   char buf[64];
 
   snprintf(buf, sizeof(buf), "Score: %d", game->score);
-  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 30);
+  render_text(buf, SCREEN_WIDTH / 2 - 60, SCREEN_HEIGHT / 2 - 30);
 
   snprintf(buf, sizeof(buf), "Level: %d", game->level);
-  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 60);
+  render_text(buf, SCREEN_WIDTH / 2 - 60, SCREEN_HEIGHT / 2);
 
   snprintf(buf, sizeof(buf), "Lines: %d", game->total_clears);
-  render_text(buf, SCREEN_WIDTH / 2 - 50, SCREEN_HEIGHT / 2 + 90);
+  render_text(buf, SCREEN_WIDTH / 2 - 60, SCREEN_HEIGHT / 2 + 30);
 
-  render_text("Press R to restart or Q to quit", SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 + 140);
+  render_text("Press R to restart or Q to quit", SCREEN_WIDTH / 2 - 150, SCREEN_HEIGHT / 2 + 70);
 
   SDL_RenderPresent(renderer);
 
