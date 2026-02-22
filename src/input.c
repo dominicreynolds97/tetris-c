@@ -2,6 +2,8 @@
 #include "SDL_events.h"
 #include "game.h"
 
+volatile int running = 1;
+
 void handle_input(GameState *game) {
   SDL_Event event;
 
@@ -21,7 +23,7 @@ void handle_input(GameState *game) {
   }
 }
 
-void handle_game_over_event(GameState *game) {
+void handle_game_over_input(GameState *game) {
   SDL_Event event;
 
   while (SDL_PollEvent(&event)) {
@@ -34,4 +36,9 @@ void handle_game_over_event(GameState *game) {
       }
     }
   }
+}
+
+void handle_sigint(int sig) {
+  (void)sig;
+  running = 0;
 }

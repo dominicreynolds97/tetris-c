@@ -9,19 +9,12 @@ int is_cell_filled(GameState *game, int row, int col) {
   return game->board[row][col] != 0;
 }
 
-void handle_sigint(int sig) {
-  (void)sig;
-  running = 0;
-}
-
-
 int main(void) {
   GameState game;
 
   setup_renderer();
   init_game(&game);
   srand(time(NULL));
-  spawn_piece(&game);
 
   struct timespec previous, current;
   clock_gettime(CLOCK_MONOTONIC, &current);

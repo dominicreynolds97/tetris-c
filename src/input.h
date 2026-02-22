@@ -7,5 +7,6 @@ extern volatile int running;
 
 void handle_input(GameState *game);
 void handle_game_over_input(GameState *game);
+void handle_sigint(int sig);
 
 #endif

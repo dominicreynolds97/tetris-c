@@ -36,12 +36,15 @@ void init_game(GameState *game) {
       game->board[r][c] = 0;
     }
   }
+
   game->score = 0;
   game->level = 1;
   game->total_clears = 0;
   game->has_stored_piece = 0;
   game->game_over = 0;
   game->speed = 1.0;
+
+  spawn_piece(game);
 }
 
 int detect_collision(GameState *game) {
@@ -102,8 +105,6 @@ void move(GameState *game, int dir) {
   }
 }
 
-
-
 void rotate(GameState *game, int dir) {
   TetrominoState rotated = {0};
   int nudge = 0;
@@ -143,7 +144,7 @@ void rotate(GameState *game, int dir) {
     if (can_rotate == 0) break;
   }
   if (can_rotate == 1) {
-    game->piece_col = nudge;
+    game->piece_col += nudge;
     game->active_piece = rotated;
   }
 }
